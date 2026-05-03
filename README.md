@@ -25,6 +25,12 @@ podman run -d --name app --network app-net \
 curl http://localhost:8080/users
 ```
 
+## Volume persistence
+
+`pg-data` survives `podman rm -f pg`. Start a new `pg` container pointing at the same volume and the Postgres cluster (databases, roles, WAL) is intact. After restarting the app, `GET /users` returns the same data.
+
+Note: `spring.jpa.hibernate.ddl-auto=create` means Hibernate drops and recreates the `users` table on every app startup. The Postgres cluster persists, but the table is always re-seeded from `data.sql`. Switch to `validate` + Flyway when schema stability matters.
+
 ## Teardown
 
 ```bash
