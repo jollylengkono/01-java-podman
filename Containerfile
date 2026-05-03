@@ -8,7 +8,7 @@ COPY src ./src
 RUN mvn package -DskipTests -q
 
 # Stage 2: runtime — JRE only (~90 MB), no build tools
-FROM docker.io/library/eclipse-temurin:21-jre-alpine AS runtime
+FROM gcr.io/distroless/java21-debian12 AS runtime
 WORKDIR /app
 COPY --from=builder /build/target/*.jar app.jar
 EXPOSE 8080
