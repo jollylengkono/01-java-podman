@@ -1,6 +1,6 @@
 # 01-java-podman
 
-Spring Boot 3 REST API (`GET /users`) backed by PostgreSQL. Both services run as rootless Podman containers on a shared user-defined network; Postgres data is persisted in a named volume. No JDK required on the host — all compilation happens inside a throwaway builder container.
+Spring Boot 3 app backed by PostgreSQL. Serves a styled HTML users table at `GET /` and a JSON REST endpoint at `GET /users`. Both services run as rootless Podman containers on a shared user-defined network; Postgres data is persisted in a named volume. No JDK required on the host — all compilation happens inside a throwaway builder container.
 
 ## What was built
 
@@ -14,7 +14,12 @@ Containers
   app  — java-podman-app:dev, port 8080, talks to pg over app-net
 ```
 
-`GET /users` → Spring Boot → Hibernate → Postgres → JSON array of 3 users.
+| Endpoint | Response |
+|---|---|
+| `GET /` | HTML page — styled table of users |
+| `GET /users` | JSON array of users |
+
+Both read from the same Postgres table via Hibernate.
 
 ## Quick start
 
@@ -36,6 +41,10 @@ podman run -d --name app --network app-net \
   -p 8080:8080 \
   java-podman-app:dev
 
+# HTML table — open in browser
+curl http://localhost:8080/
+
+# JSON
 curl http://localhost:8080/users
 ```
 
