@@ -1,0 +1,45 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write   # required to push to ghcr.io with GITHUB_TOKEN
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: |
+          podman run --rm \
+            -v ${{ github.workspace }}:/work:z \
+            -w /work \
+            docker.io/library/maven:3.9-eclipse-temurin-21 \
+            mvn test -q
+
+      - name: Log in to ghcr.io
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            podman login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build and push image
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/java-podman-app
+        run: |
+          podman build -t $IMAGE:${{ github.sha }} -t $IMAGE:latest .
+          podman push $IMAGE:${{ github.sha }}
+          podman push $IMAGE:latest
+
+      - name: Deploy to kind
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/java-podman-app
+        run: |
+          kubectl set image deployment/java-app \
+            java-app=$IMAGE:${{ github.sha }}
+          kubectl rollout status deployment/java-app --timeout=120s
