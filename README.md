@@ -56,6 +56,28 @@ podman network rm app-net
 # podman volume rm pg-data   # only if you want to wipe data too
 ```
 
+## CI/CD pipeline
+
+A GitHub Actions workflow at `.github/workflows/ci.yaml` runs on every push to `main` via a self-hosted runner in WSL2:
+
+```
+git push → runner picks up job
+  1. mvn test          (H2 in-memory — no Postgres needed)
+  2. podman build      (multi-stage, same Containerfile)
+  3. podman push       ghcr.io/jollylengkono/java-podman-app:<sha>
+                       ghcr.io/jollylengkono/java-podman-app:latest
+  4. kubectl set image deployment/java-app java-app=ghcr.io/...:<sha>
+  5. kubectl rollout status --timeout=120s
+```
+
+The pipeline fails fast: a test failure stops the build; a push failure stops the deploy. `rollout status` blocks the job until Kubernetes confirms both pods are running the new image.
+
+Verify a successful deploy:
+```bash
+kubectl describe pods -l app=java-app | grep Image:
+# → ghcr.io/jollylengkono/java-podman-app:<40-char sha>
+```
+
 ## What was learned
 
 ### Multi-stage builds
@@ -77,7 +99,18 @@ Hibernate drops and recreates the `users` table on every app startup. The Postgr
 ### Distroless
 Swapping `eclipse-temurin:21-jre-alpine` for `gcr.io/distroless/java21-debian12` in one `FROM` line removes the shell entirely. `podman exec app sh` returns exit 127 — there is no `sh`, no `ls`, no `curl` in the image. The app runs fine; there is simply nothing for an attacker to interact with. The distroless image shows a "56 years ago" creation date — Google uses epoch 0 as a reproducible build timestamp.
 
+### CI/CD concepts
+
+**`GITHUB_TOKEN`** is injected automatically into every Actions run — no stored secrets needed to push to ghcr.io. It expires when the job ends, so it can't be leaked from a long-lived config file. `permissions.packages: write` must be declared in the workflow or the push is rejected with 403.
+
+**Self-hosted runner** bridges GitHub Actions to infrastructure that GitHub-hosted runners can't reach — in this case the local kind cluster. The runner runs as the same user (`jolly_lengkono`) that owns the kubeconfig, so kubectl works without extra credentials. `KUBECONFIG` is set explicitly in the workflow because systemd service environments don't inherit `HOME`.
+
+**SHA tagging** makes every build immutable and traceable. `:<sha>` is what gets deployed; `:latest` is a convenience alias. `kubectl set image` with the SHA means the Deployment spec changes on every push, which triggers a rolling update even if the image layers are identical.
+
+**`rollout status`** makes the pipeline's success reflect real cluster health, not just "the API call was accepted." If pods crash or fail readiness checks, the job fails and the bad image is flagged before it affects users.
+
 ### Gotchas
 - **Short image names don't resolve** on this WSL2/rootless Podman setup. Use fully qualified names: `docker.io/library/postgres:16-alpine`, not `postgres:16-alpine`.
 - **`podman restart` does not pick up a rebuilt image.** It reuses the container's original image layer. To run a newly built image, `podman rm -f app` and `podman run` again.
 - **`defer-datasource-initialization=true` is required** in Spring Boot 2.5+ when using `data.sql` with JPA. Without it, Spring tries to run `data.sql` before Hibernate has created the table and the seed inserts fail.
+- **`-v …:z` is required for rootless Podman volume mounts in the runner.** The `:z` flag applies an SELinux label so the container can read the checked-out workspace. Without it, `mvn test` fails with permission errors on the source files.
